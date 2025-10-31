@@ -3,9 +3,16 @@ import pandas as pd
 import streamlit as st
 from crewai import CrewOutput
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, date
 import json
+import logging
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 from database_manager import DatabaseClient
 from stock_agents import CrewAiAgentsConfig
 
@@ -91,27 +98,26 @@ class StockMarketAnalyzer:
         # Placeholder implementation - replace with actual data retrieval logic
         return self.database_manager.list_stock_data_analysis_dates()
 
-    def list_stock_data_analysis(self):
+    def list_stock_data_analysis(self, query:str):
         """
         List all stock data analysis from the database.
         :return:
         """
-        query = "Fetch all rows and columns except day_end_price from stock_market_analysis_data table based on today's date"
+
         response = self.crewAiAgentsConfig.get_stock_data_from_db(query)
         print(f'stock data analysis response is {response}')
         return response
 
-    def get_closing_price(self, review_date: datetime):
+    def get_closing_price(self, review_date: str):
         """
         Get the closing price for stocks on a given date.
         :param review_date:
         :return:
         """
-        query = f"Fetch stock_name, stock_code, day_end_price, analysis_date from stock_market_analysis_data where analysis_date = '{review_date.date()}'"
-        response = self.crewAiAgentsConfig.get_stock_data_from_db(query)
+        response = self.crewAiAgentsConfig.get_closing_price(review_date)
         print(f'closing price response is {response}')
         if not response.stocks:
-            return {'error': f'No closing price data found for {review_date.date()}'}
+            return {'error': f'No closing price data found for {review_date}'}
         return response
 
 
@@ -129,51 +135,97 @@ class StockMarketAnalyzer:
 
             st.subheader("Evening Scan")
             dates = self.list_recommendation_dates()
-            review_date = st.selectbox("Select Review Date", options=dates if dates else [datetime.utcnow()], key="evening_review_date")
+            review_date = st.selectbox("Select Review Date", options=dates if dates else [datetime.utcnow().date()], key="evening_review_date")
             run_evening = st.button("Run Evening Review", type="primary", key="evening_review_button", use_container_width=True)
+
 
         if 'run_morning' not in locals():
             run_morning = False
         if run_morning:
+            st.session_state.morning_results = None
             with st.spinner("Running Stock Analysis..."):
                 response = self.run_morning_scan(market, max_recs)
                 st.session_state.morning_results = "Analysis Completed"
+
+        # create empty dataframe
+        df = pd.DataFrame()
+
         if st.session_state.morning_results:
             st.markdown("### ✅ Morning Recommendations")
-            response = self.list_stock_data_analysis()
+            query = "Fetch all rows and columns except day_end_price from stock_market_analysis_data table based on today's date"
+            response = self.list_stock_data_analysis(query)
             if response is not None:
+                logger.info(f"Morning scan response: {response}")
                 if hasattr(response, "pydantic") and hasattr(response.pydantic, "stocks"):
+                    logger.info(f"pydantic Response stocks: {response.pydantic.stocks}")
                     rows = [s.model_dump() if hasattr(s, "model_dump") else s.dict() for s in response.pydantic.stocks]
-                    df = pd.DataFrame(rows)[
-                    ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
-                     "stop_loss", "analysis_date_time", "analysis"]]
+                    if rows is not None and len(rows) > 0:
+                        df = pd.DataFrame(rows)[
+                        ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
+                            "stop_loss", "analysis_date", "analysis"]]
                 # Fallbacks if pydantic is a JSON string or dict
                 else:
                     import json
                     payload = response.pydantic if hasattr(response, "pydantic") else getattr(response, "json_dict", response)
-                    if isinstance(payload, str):
-                        payload = json.loads(payload)
-                    if isinstance(payload, dict) and "stocks" in payload:
-                        df = pd.DataFrame(payload["stocks"])[
-                    ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
-                     "stop_loss", "analysis_date_time", "analysis"]]
-                    else:
-                        df = pd.DataFrame(payload if isinstance(payload, list) else [payload])
+                    if payload is not None and len(payload) > 0:
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+                        if isinstance(payload, dict) and "stocks" in payload:
+                            df = pd.DataFrame(payload["stocks"])[
+                                ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
+                                "stop_loss", "analysis_date", "analysis"]]
+                        else:
+                            df = pd.DataFrame(payload if isinstance(payload, list) else [payload])
             else:
                 # no recommendations. create an empty dataframe
                 df = pd.DataFrame()
+
             st.dataframe(df)
 
         if 'run_evening' not in locals():
             run_evening = False
         if run_evening and dates:
             date_to_review = review_date
+            # run agent to fetch closing pric
             with st.spinner(f"Reviewing recommendations for {date_to_review}..."):
-                review = self.get_closing_price(date_to_review)
-                if 'error' in review:
-                    st.error(review['error'])
+                #response = self.get_closing_price(str(date_to_review))
+                st.session_state.evening_results = "Analysis Completed"
+
+
+        if st.session_state.evening_results is not None:
+            # fetch results from database and display
+            logger.info("Fetching evening review results from database...")
+            st.markdown("### ✅ Evening Review Results")
+            query = "Fetch all rows and columns from stock_market_analysis_data table based on analysis_date {date_to_review}}"
+            response = self.list_stock_data_analysis(query)
+            if response is not None:
+                logger.info(f"Evening scan response: {response}")
+                if hasattr(response, "pydantic") and hasattr(response.pydantic, "stocks"):
+                    logger.info(f"pydantic Response stocks: {response.pydantic.stocks}")
+                    rows = [s.model_dump() if hasattr(s, "model_dump") else s.dict() for s in response.pydantic.stocks]
+                    if rows is not None and len(rows) > 0:
+                        df = pd.DataFrame(rows)[
+                        ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
+                            "stop_loss", "analysis_date", "analysis", "day_end_price"]]
+                # Fallbacks if pydantic is a JSON string or dict
                 else:
-                    st.session_state.evening_results = review
+                    import json
+                    payload = response.pydantic if hasattr(response, "pydantic") else getattr(response, "json_dict", response)
+                    if payload is not None and len(payload) > 0:
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+                        if isinstance(payload, dict) and "stocks" in payload:
+                            df = pd.DataFrame(payload["stocks"])[
+                                ["stock_name", "stock_code", "market", "buy_price", "target_price_daily", "target_price_weekly",
+                                "stop_loss", "analysis_date", "analysis", "day_end_price"]]
+                        else:
+                            df = pd.DataFrame(payload if isinstance(payload, list) else [payload])
+            else:
+                # no recommendations. create an empty dataframe
+                df = pd.DataFrame()
+
+            st.dataframe(df)
+
 
 
 if __name__ == '__main__':

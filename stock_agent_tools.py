@@ -50,24 +50,50 @@ def store_stock_data(stock_analysis_data: StockAnalysisDataList) -> bool:
         session = database_client.SessionLocal()
         logger.info(f"type of stock_analysis_data is {type(stock_analysis_data)}")
         logger.info(f"Received stock analysis data to store: {stock_analysis_data}")
-        for stocks in stock_analysis_data["stocks"]:
-            logger.info(f"trying to save stock data: {stocks}")
-            logger.info(f"type of stocks is {type(stocks)}")
+
+        # Normalize payload into a list of dictionaries
+        payload = stock_analysis_data
+        if hasattr(payload, "stocks"):
+            items = payload.stocks
+        elif isinstance(payload, dict) and "stocks" in payload:
+            items = payload["stocks"]
+        elif isinstance(payload, list):
+            items = payload
+        else:
+            items = [payload]
+
+        saved = 0
+        for item in items:
+            # Convert pydantic objects to dicts if needed
+            if hasattr(item, "model_dump"):
+                data = item.model_dump()
+            elif hasattr(item, "dict"):
+                data = item.dict()
+            else:
+                data = item
+
+            if not isinstance(data, dict):
+                logger.warning(f"Skipping non-dict item: {type(data)} -> {data}")
+                continue
+
             stock_data = StockMarketAnalysisData(
-                stock_name=stocks.get("stock_name"),
-                stock_code = stocks.get("stock_code"),
-                market=stocks.get("market"),
-                buy_price=stocks.get("buy_price"),
-                target_price_daily=stocks.get("target_price_daily"),
-                target_price_weekly=stocks.get("target_price_weekly"),
-                stop_loss=stocks.get("stop_loss"),
-                analysis_date=stocks.get("analysis_date_time")
+                stock_name=data.get("stock_name"),
+                stock_code=data.get("stock_code"),
+                market=data.get("market"),
+                buy_price=data.get("buy_price"),
+                target_price_daily=data.get("target_price_daily"),
+                target_price_weekly=data.get("target_price_weekly"),
+                stop_loss=data.get("stop_loss"),
+                analysis_date=data.get("analysis_date_time")
             )
             session.add(stock_data)
+            saved += 1
+
         session.commit()
-        logger.info(f"Stored stock data for {stock_analysis_data.stock_name} successfully.")
+        logger.info(f"Stored {saved} stock analysis rows successfully.")
         return True
     except Exception as e:
+        session.rollback()
         logger.error(f"Failed to store stock data: {e}")
         return False
     finally:

@@ -1,7 +1,7 @@
 from typing import List
 
 from pydantic import BaseModel, Field, validator
-from datetime import datetime
+from datetime import date
 
 
 # pydantic model to represent stock analysis data
@@ -13,14 +13,10 @@ class StockAnalysisData(BaseModel):
     target_price_daily: float
     target_price_weekly: float
     stop_loss: float
-    analysis_date_time: datetime
+    analysis_date: date
     analysis: str
+    day_end_price: float
 
-    @validator("analysis_date_time", pre=True, always=True)
-    def parse_analysis_date_time(cls, value):
-        if isinstance(value, str):
-            return datetime.fromisoformat(value)
-        return value
 
 class StockAnalysisDataList(BaseModel):
     stocks: List[StockAnalysisData] = Field(description="List of stock analysis data")
@@ -30,7 +26,7 @@ class StockClosingPrice(BaseModel):
     stock_name: str
     stock_code: str
     day_end_price: float
-    analysis_date: datetime
+    analysis_date: date
 
 class StockClosingPriceList(BaseModel):
     closing_prices: List[StockClosingPrice] = Field(description="List of stock closing prices")

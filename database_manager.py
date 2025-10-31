@@ -2,7 +2,7 @@ from typing import List
 
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import text
-from sqlalchemy import create_engine, Column, String, DateTime, PrimaryKeyConstraint, Float
+from sqlalchemy import create_engine, Column, String, DateTime, PrimaryKeyConstraint, Float, Date
 from datetime import datetime, date
 import logging
 
@@ -27,7 +27,7 @@ class StockMarketAnalysisData(Base):
     target_price_daily = Column(Float, nullable=False)
     target_price_weekly = Column(Float, nullable=False)
     stop_loss = Column(Float, nullable=False, default=0)
-    analysis_date = Column(DateTime, nullable=False, default=datetime.utcnow())
+    analysis_date = Column(Date, nullable=False, default=datetime.utcnow().date())
     day_end_price = Column(Float, nullable=True)
 
     #primary key constraint
@@ -87,4 +87,6 @@ class DatabaseClient:
                 dates.append(val)
         logger.info(f'stock data analysis dates are {dates}')
         return dates
+
+
 

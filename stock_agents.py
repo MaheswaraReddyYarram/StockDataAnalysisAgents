@@ -28,19 +28,24 @@ class CrewAiAgentsConfig:
         # agent for research task
         self.stock_research_agent = Agent(
             role="Stock Research Agent",
-            goal="Research financial markets and stock information for {market}",
+            goal="Research financial markets and get latest stock information for {market} for this current year",
             backstory=("You are a seasoned financial analyst with deep knowledge of stock markets and investment strategies."
                       " Your expertise allows you to gather and analyze latest market data effectively."
                       " Your goal is to gather comprehensive information on stocks and market trends."
-                      " Use already analyzed data from previous runs from database by using proper tools and adjust the research accordingly."),
-            tools=[search_tool, execute_sql],
+                      " Use already analyzed data from previous runs from database by using proper tools and adjust the research accordingly."
+                      " Use the `list_tables` to find available tables."
+                      " Use the `tables_schema` to understand the metadata for the tables."
+                      " Use the `execute_sql` to check your queries for correctness."
+                      " Use the `check_sql` to execute queries against the database."
+                       ),
+            tools=[search_tool, execute_sql, list_tables, check_sql, tables_schema],
             allow_delegation=True,
             verbose=verbose_flag
         )
 
         # define tasks for stock research agent
         self.research_task = Task(
-            description="Conduct in-depth research on the current state of the {market} stock market.",
+            description="Conduct in-depth research on the current state of the {market} stock market for this current year",
             expected_output="Comprehensive latest market data, stock performance metrics, and relevant news articles.",
             agent=self.stock_research_agent
         )
@@ -54,8 +59,14 @@ class CrewAiAgentsConfig:
                        " Generate stock name, stock code, buy price, target price for both day and week trades, "
                        " stop loss prices for each identified stock, current date and time as analysis date time,"
                        " in the {market} and provide a brief rationale for each recommendation."
-                       " Use already analyzed data from previous runs from database by using proper tools and adjust the research accordingly."),
-            tools =[search_tool, execute_sql],
+                       " Use already analyzed data from previous runs from the database table 'stock_market_data_analysis'"
+                       " by using proper tools and adjust the research accordingly."
+                       " Use the `list_tables` to find available tables."
+                       " Use the `tables_schema` to understand the metadata for the tables."
+                       " Use the `execute_sql` to check your queries for correctness."
+                       " Use the `check_sql` to execute queries against the database."
+                       ),
+            tools =[search_tool, execute_sql, list_tables, check_sql, tables_schema],
             allow_delegation=True,
             verbose=verbose_flag,
             memory=True
@@ -66,8 +77,8 @@ class CrewAiAgentsConfig:
             description="Analyze the researched stock data and identify top {number} stocks to buy with detailed recommendations.",
             expected_output=("A list of top {number} stocks along with stock code in the specified {market} to buy with buy price, "
                              "target price for day and weekly trades, stop loss prices, analysis date time and rationale."
-                             "Analysis date time should be the current date and time when the analysis is performed."
-                             "Analysis date time should be in the format of YYYY-MM-DDTHH:MM:SS"
+                             "Analysis date should be the current date when the analysis is performed."
+                             "Analysis date should be in the format of YYYY-MM-DD"
                              "Output should be in the form of list of StockAnalysisData objects"),
             agent=self.stock_analysis_agent,
             output_json=StockAnalysisDataList
@@ -78,10 +89,13 @@ class CrewAiAgentsConfig:
         self.stock_data_storage_agent = Agent(
             role="Stock Data Storage Agent",
             goal="Store and manage researched stock data efficiently",
-            backstory=(" You are responsible for organizing and maintaining the integrity of stock data generated from stock_analysis_agent"
+            backstory=(" You are responsible for organizing and maintaining the integrity of stock data generated from the agent stock_analysis_agent"
                        " Your expertise ensures that all researched information is accurately stored and easily accessible."
                        " Expect input in the form of StockAnalysisDataList objects"),
-            tools=[store_stock_data]
+            tools=[store_stock_data],
+            verbose=verbose_flag,
+            memory=True,
+            allow_delegation=False
         )
 
         # define task for stock_data_storage_agent
@@ -119,9 +133,10 @@ class CrewAiAgentsConfig:
         # agent to get stock price at end of the day
         self.stock_closing_price_analysis_agent= Agent(
             role="Stock Price Agent",
-            goal="Fetch the stock closing price for the day {date} for given stock codes {stock_codes}",
+            goal="Fetch the stock closing price for the date {review_date} for the stock codes fetched from the database",
             backstory=(" You are an expert in retrieving accurate stock price data."
-                       " Your goal is to provide the closing stock prices for the requested stock codes."
+                       " Your goal is to fetch stock names or codes from the table 'stock_market_data_analysis' for the date {review_date}"
+                       " and get their closing prices for that date."
                        " Use search tool to get the stock prices."
                        " Use the `list_tables` to find available tables."
                        " Use the `tables_schema` to understand the metadata for the tables."
@@ -134,14 +149,14 @@ class CrewAiAgentsConfig:
         )
 
         self.stock_closing_price_task = Task(
-            description="Retrieve the closing stock prices for the specified stock codes {stock_codes} for the given date {date}.",
-            expected_output="(Update the day_end_price column for each stock code with the retrieved closing price)."
-                            " A list of stock codes with their corresponding closing prices for the day.",
+            description="Retrieve the closing stock prices for the given date {review_date} for all the stock codes fetched from database",
+            expected_output=("Update the day_end_price column for each stock code with the retrieved closing price."
+                            " Successful updation of closing prices for all stock codes for the given date."),
             agent=self.stock_closing_price_analysis_agent
         )
 
 
-    def get_closing_price(self, date: str, stock_codes: List[str]):
+    def get_closing_price(self, review_date: str):
         """
         Get the closing stock prices for the given date and stock codes.
         :param date:
@@ -156,9 +171,9 @@ class CrewAiAgentsConfig:
         )
 
         inputs = {
-            "date": date,
-            "stock_codes": stock_codes
+            "review_date": review_date
         }
+        logger.info(f"Starting closing price analysis crew with inputs:{inputs}")
 
         response = stock_price_crew.kickoff(inputs=inputs)
         return response
@@ -183,6 +198,7 @@ class CrewAiAgentsConfig:
             "market": market,
             "number": number
         }
+        logger.info(f"Starting stock analysis crew with inputs:{inputs}")
 
         response = stock_crew.kickoff(inputs=inputs)
         return response
@@ -203,6 +219,7 @@ class CrewAiAgentsConfig:
         inputs = {
             "query": query
         }
+        logger.info(f"Starting SQL query crew with inputs:{inputs}")
 
         response = sql_crew.kickoff(inputs=inputs)
         return response
